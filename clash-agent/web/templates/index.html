@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Clash Agent - 运维控制台</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.4/socket.io.min.js"></script>
+</head>
+<body>
+    <div class="app-container">
+        <!-- 侧边栏 -->
+        <nav class="sidebar">
+            <div class="sidebar-header">
+                <h1><i class="fas fa-network-wired"></i> Clash Agent</h1>
+                <span class="version">v1.0.0</span>
+            </div>
+            <ul class="nav-menu">
+                <li class="nav-item active" data-page="dashboard">
+                    <i class="fas fa-tachometer-alt"></i>
+                    <span>仪表盘</span>
+                </li>
+                <li class="nav-item" data-page="tools">
+                    <i class="fas fa-wrench"></i>
+                    <span>工具管理</span>
+                </li>
+                <li class="nav-item" data-page="chat">
+                    <i class="fas fa-comments"></i>
+                    <span>智能对话</span>
+                </li>
+                <li class="nav-item" data-page="logs">
+                    <i class="fas fa-file-alt"></i>
+                    <span>运行日志</span>
+                </li>
+                <li class="nav-item" data-page="memory">
+                    <i class="fas fa-brain"></i>
+                    <span>记忆系统</span>
+                </li>
+            </ul>
+            <div class="sidebar-footer">
+                <div class="connection-status">
+                    <span class="status-dot disconnected"></span>
+                    <span>未连接</span>
+                </div>
+            </div>
+        </nav>
+
+        <!-- 主内容区 -->
+        <main class="main-content">
+            <!-- 仪表盘页面 -->
+            <div class="page active" id="page-dashboard">
+                <div class="page-header">
+                    <h2><i class="fas fa-tachometer-alt"></i> 系统仪表盘</h2>
+                </div>
+                <div class="dashboard-grid">
+                    <!-- Clash状态 -->
+                    <div class="card status-card">
+                        <div class="card-header">
+                            <h3><i class="fas fa-server"></i> Clash 状态</h3>
+                            <button class="btn btn-sm btn-primary" id="btn-refresh-status">
+                                <i class="fas fa-sync-alt"></i> 刷新
+                            </button>
+                        </div>
+                        <div class="card-body">
+                            <div class="status-indicator">
+                                <span class="status-badge unknown" id="clash-status-badge">未知</span>
+                            </div>
+                            <div class="control-buttons">
+                                <button class="btn btn-success" id="btn-clash-on">
+                                    <i class="fas fa-power-off"></i> 开启
+                                </button>
+                                <button class="btn btn-warning" id="btn-clash-off">
+                                    <i class="fas fa-power-off"></i> 关闭
+                                </button>
+                                <button class="btn btn-info" id="btn-clash-restart">
+                                    <i class="fas fa-redo"></i> 重启
+                                </button>
+                            </div>
+                            <div class="info-list" id="clash-info-list">
+                                <!-- 动态填充 -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 系统信息 -->
+                    <div class="card system-card">
+                        <div class="card-header">
+                            <h3><i class="fas fa-desktop"></i> 系统信息</h3>
+                        </div>
+                        <div class="card-body" id="system-info">
+                            <div class="info-row">
+                                <span class="label">主机名:</span>
+                                <span class="value" id="sys-hostname">-</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="label">系统:</span>
+                                <span class="value" id="sys-os">-</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="label">架构:</span>
+                                <span class="value" id="sys-arch">-</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="label">内核:</span>
+                                <span class="value" id="sys-kernel">-</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 内存使用 -->
+                    <div class="card memory-card">
+                        <div class="card-header">
+                            <h3><i class="fas fa-memory"></i> 内存使用</h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="progress-container">
+                                <div class="progress-bar" id="memory-progress" style="width: 0%"></div>
+                            </div>
+                            <div class="usage-text" id="memory-text">-</div>
+                        </div>
+                    </div>
+
+                    <!-- 磁盘使用 -->
+                    <div class="card disk-card">
+                        <div class="card-header">
+                            <h3><i class="fas fa-hdd"></i> 磁盘使用</h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="progress-container">
+                                <div class="progress-bar disk" id="disk-progress" style="width: 0%"></div>
+                            </div>
+                            <div class="usage-text" id="disk-text">-</div>
+                        </div>
+                    </div>
+
+                    <!-- 网络测试 -->
+                    <div class="card network-card">
+                        <div class="card-header">
+                            <h3><i class="fas fa-globe"></i> 网络测试</h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="input-group">
+                                <input type="text" id="test-target" placeholder="测试目标URL" value="https://www.google.com">
+                                <button class="btn btn-primary" id="btn-network-test">
+                                    <i class="fas fa-satellite-dish"></i> 测试
+                                </button>
+                            </div>
+                            <div class="result-display" id="network-test-result">
+                                <!-- 动态显示 -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- DNS检查 -->
+                    <div class="card dns-card">
+                        <div class="card-header">
+                            <h3><i class="fas fa-search"></i> DNS检查</h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="input-group">
+                                <input type="text" id="dns-domain" placeholder="检查域名" value="google.com">
+                                <button class="btn btn-primary" id="btn-dns-check">
+                                    <i class="fas fa-search"></i> 检查
+                                </button>
+                            </div>
+                            <div class="result-display" id="dns-check-result">
+                                <!-- 动态显示 -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 订阅更新 -->
+                    <div class="card subscription-card">
+                        <div class="card-header">
+                            <h3><i class="fas fa-download"></i> 订阅更新</h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="input-group">
+                                <input type="text" id="sub-url" placeholder="订阅URL（可选）">
+                                <button class="btn btn-success" id="btn-sub-update">
+                                    <i class="fas fa-sync"></i> 更新
+                                </button>
+                            </div>
+                            <div class="result-display" id="sub-update-result">
+                                <!-- 动态显示 -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 工具管理页面 -->
+            <div class="page" id="page-tools">
+                <div class="page-header">
+                    <h2><i class="fas fa-wrench"></i> 工具管理</h2>
+                </div>
+                <div class="tools-container">
+                    <div class="tools-header">
+                        <span>可用工具: <strong id="tools-count">0</strong> 个</span>
+                    </div>
+                    <div class="tools-grid" id="tools-list">
+                        <!-- 动态填充工具卡片 -->
+                    </div>
+                    <div class="tool-executor">
+                        <div class="executor-header">
+                            <h3><i class="fas fa-play"></i> 工具执行</h3>
+                        </div>
+                        <div class="executor-body">
+                            <div class="form-group">
+                                <label>工具名称</label>
+                                <select id="tool-select">
+                                    <option value="">选择工具...</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>参数 (JSON格式)</label>
+                                <textarea id="tool-params" rows="3" placeholder='{"param": "value"}'>{}</textarea>
+                            </div>
+                            <button class="btn btn-primary btn-block" id="btn-execute-tool">
+                                <i class="fas fa-play-circle"></i> 执行
+                            </button>
+                            <div class="result-box" id="tool-result">
+                                <!-- 执行结果 -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 智能对话页面 -->
+            <div class="page" id="page-chat">
+                <div class="page-header">
+                    <h2><i class="fas fa-comments"></i> 智能对话</h2>
+                    <button class="btn btn-sm btn-danger" id="btn-clear-chat">
+                        <i class="fas fa-trash"></i> 清空
+                    </button>
+                </div>
+                <div class="chat-container">
+                    <div class="chat-messages" id="chat-messages">
+                        <div class="welcome-message">
+                            <i class="fas fa-robot"></i>
+                            <p>欢迎使用Clash Agent智能运维助手！</p>
+                            <p class="hint">你可以输入问题描述，如"节点超时怎么办"、"面板打不开"等...</p>
+                        </div>
+                    </div>
+                    <div class="chat-input-area">
+                        <div class="input-wrapper">
+                            <textarea id="chat-input" placeholder="输入你的问题..." rows="1"></textarea>
+                            <button class="btn btn-primary send-btn" id="btn-send-chat">
+                                <i class="fas fa-paper-plane"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 运行日志页面 -->
+            <div class="page" id="page-logs">
+                <div class="page-header">
+                    <h2><i class="fas fa-file-alt"></i> 运行日志</h2>
+                    <div class="header-actions">
+                        <select id="log-level-filter">
+                            <option value="all">全部</option>
+                            <option value="INFO">INFO</option>
+                            <option value="WARNING">WARNING</option>
+                            <option value="ERROR">ERROR</option>
+                        </select>
+                        <button class="btn btn-sm btn-danger" id="btn-clear-logs">
+                            <i class="fas fa-trash"></i> 清空
+                        </button>
+                    </div>
+                </div>
+                <div class="logs-container">
+                    <div class="logs-list" id="logs-list">
+                        <!-- 动态填充日志 -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- 记忆系统页面 -->
+            <div class="page" id="page-memory">
+                <div class="page-header">
+                    <h2><i class="fas fa-brain"></i> 记忆系统</h2>
+                </div>
+                <div class="memory-container">
+                    <div class="memory-stats">
+                        <div class="stat-card">
+                            <i class="fas fa-exclamation-triangle"></i>
+                            <span class="stat-value" id="stat-total-faults">0</span>
+                            <span class="stat-label">总故障</span>
+                        </div>
+                        <div class="stat-card">
+                            <i class="fas fa-check-circle"></i>
+                            <span class="stat-value" id="stat-resolved-faults">0</span>
+                            <span class="stat-label">已解决</span>
+                        </div>
+                        <div class="stat-card">
+                            <i class="fas fa-lightbulb"></i>
+                            <span class="stat-value" id="stat-experiences">0</span>
+                            <span class="stat-label">经验知识</span>
+                        </div>
+                        <div class="stat-card">
+                            <i class="fas fa-calendar-week"></i>
+                            <span class="stat-value" id="stat-week-faults">0</span>
+                            <span class="stat-label">本周故障</span>
+                        </div>
+                    </div>
+                    <div class="faults-list">
+                        <div class="list-header">
+                            <h3>最近故障记录</h3>
+                        </div>
+                        <div class="table-container">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>时间</th>
+                                        <th>症状</th>
+                                        <th>根因</th>
+                                        <th>状态</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="faults-table-body">
+                                    <!-- 动态填充 -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- 通知容器 -->
+    <div class="notification-container" id="notifications"></div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>

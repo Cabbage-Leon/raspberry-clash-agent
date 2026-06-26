@@ -1,5 +1,6 @@
 """
 Web服务 - Flask后端API
+增强版：WebSocket实时推送ReAct步骤
 """
 
 import json
@@ -23,7 +24,6 @@ from src.utils.logger import get_logger
 
 logger = get_logger()
 
-# 创建Flask应用
 from pathlib import Path
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 
@@ -32,30 +32,40 @@ app = Flask(__name__,
             static_folder=str(PROJECT_ROOT / 'web' / 'static'))
 app.config['SECRET_KEY'] = 'clash-agent-secret-key'
 
-# 创建SocketIO
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
-# 全局Agent实例
-agent = None
+agent_engine = None
 
-# 日志消息队列
 log_queue = queue.Queue(maxsize=1000)
 
 
 def init_agent():
-    """初始化Agent"""
-    global agent
-    if agent is None:
+    """初始化Agent并配置实时回调"""
+    global agent_engine
+    if agent_engine is None:
         from main import register_all_tools
         register_all_tools()
         llm_manager = LLMManager()
         memory = Memory()
-        agent = ReActEngine(
+        agent_engine = ReActEngine(
             llm_manager=llm_manager,
             tool_registry=global_tool_registry,
             memory=memory
         )
-    return agent
+        agent_engine.add_step_callback(react_step_callback)
+    return agent_engine
+
+
+def react_step_callback(event: str, data: dict):
+    """ReAct步骤回调 - 通过WebSocket推送到前端"""
+    try:
+        socketio.emit('react_event', {
+            'event': event,
+            'data': data,
+            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        })
+    except Exception as e:
+        logger.error(f"推送ReAct事件失败: {e}")
 
 
 class LogEmitter:
@@ -172,7 +182,6 @@ def api_tool_execute():
     if not tool_name:
         return jsonify({'success': False, 'error': '缺少工具名称'})
     
-    # 发送日志
     log_emitter.emit('INFO', f'执行工具: {tool_name}, 参数: {params}')
     
     try:
@@ -192,7 +201,7 @@ def api_tool_execute():
 
 @app.route('/api/chat', methods=['POST'])
 def api_chat():
-    """对话接口"""
+    """对话接口（同步）"""
     data = request.json
     message = data.get('message')
     
@@ -354,28 +363,35 @@ def handle_disconnect():
 
 @socketio.on('chat_message')
 def handle_chat_message(data):
-    """处理对话消息"""
+    """处理对话消息（实时推送ReAct步骤）"""
     message = data.get('message', '')
+    sid = request.sid
+    
     log_emitter.emit('INFO', f'收到消息: {message}')
     
-    try:
-        engine = init_agent()
-        result = engine.run(message)
-        
-        emit('chat_response', {
-            'success': True,
-            'response': result.response,
-            'iterations': result.iterations,
-            'steps': [s.to_dict() for s in result.steps]
-        })
-        
-        log_emitter.emit('INFO', f'响应完成，共{result.iterations}轮')
-    except Exception as e:
-        emit('chat_response', {
-            'success': False,
-            'error': str(e)
-        })
-        log_emitter.emit('ERROR', f'处理失败: {e}')
+    def run_agent():
+        try:
+            engine = init_agent()
+            result = engine.run(message)
+            
+            socketio.emit('chat_complete', {
+                'success': True,
+                'response': result.response,
+                'iterations': result.iterations,
+                'steps': [s.to_dict() for s in result.steps],
+                'final_state': result.final_state
+            }, room=sid)
+            
+            log_emitter.emit('INFO', f'响应完成，共{result.iterations}轮')
+        except Exception as e:
+            socketio.emit('chat_complete', {
+                'success': False,
+                'error': str(e)
+            }, room=sid)
+            log_emitter.emit('ERROR', f'处理失败: {e}')
+    
+    thread = threading.Thread(target=run_agent, daemon=True)
+    thread.start()
 
 
 @socketio.on('execute_tool')
@@ -407,10 +423,8 @@ def run_web_server(host='0.0.0.0', port=5000, debug=False):
     """运行Web服务器"""
     logger.info(f'启动Web服务器: http://{host}:{port}')
     
-    # 初始化Agent
     init_agent()
     
-    # 运行SocketIO
     socketio.run(app, host=host, port=port, debug=debug, allow_unsafe_werkzeug=True)
 
 

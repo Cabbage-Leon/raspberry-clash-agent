@@ -232,9 +232,15 @@
             <div class="page" id="page-chat">
                 <div class="page-header">
                     <h2><i class="fas fa-comments"></i> 智能对话</h2>
-                    <button class="btn btn-sm btn-danger" id="btn-clear-chat">
-                        <i class="fas fa-trash"></i> 清空
-                    </button>
+                    <div class="header-actions">
+                        <label class="toggle-label">
+                            <input type="checkbox" id="toggle-thinking" checked>
+                            <span>显示思考过程</span>
+                        </label>
+                        <button class="btn btn-sm btn-danger" id="btn-clear-chat">
+                            <i class="fas fa-trash"></i> 清空
+                        </button>
+                    </div>
                 </div>
                 <div class="chat-container">
                     <div class="chat-messages" id="chat-messages">
@@ -247,9 +253,13 @@
                     <div class="chat-input-area">
                         <div class="input-wrapper">
                             <textarea id="chat-input" placeholder="输入你的问题..." rows="1"></textarea>
-                            <button class="btn btn-primary send-btn" id="btn-send-chat">
+                            <button class="btn btn-primary send-btn" id="btn-send-chat" disabled>
                                 <i class="fas fa-paper-plane"></i>
                             </button>
+                        </div>
+                        <div class="chat-status" id="chat-status">
+                            <span class="status-indicator idle"></span>
+                            <span id="chat-status-text">就绪</span>
                         </div>
                     </div>
                 </div>

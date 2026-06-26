@@ -15,39 +15,29 @@ SYSTEM_PROMPT = """你是一个专业的Clash/Mihomo网关运维AI Agent。
 ## 记忆上下文
 {memory_context}
 
+## 工作流程
+1. 分析用户问题，理解故障现象
+2. 决定下一步行动：调用工具或直接回复
+3. 工具执行后，根据结果决定下一步
+4. 任务完成后，用自然语言回复用户
+
 ## 输出格式
-你必须按照以下JSON格式输出思考过程：
+你必须严格按照以下JSON格式输出，不要有任何额外文字：
 
 {{
-    "reasoning": "分析用户问题的推理过程",
-    "action": "要执行的动作（工具名或'respond'）",
-    "action_params": {{"tool_param": "value"}},
-    "reflection": "对当前状态的反思判断"
+    "reasoning": "你对当前问题的分析和推理过程",
+    "action": "要执行的动作：工具名称 或 'respond'（直接回复用户）",
+    "action_params": {{"参数名": "参数值"}},
+    "is_complete": false,
+    "response": "如果action为'respond'，这里填写给用户的回复内容"
 }}
 
-## 关键原则
-1. 先理解问题，再选择工具
-2. 每个动作都要有明确的推理依据
-3. 工具执行后必须验证结果
-4. 无法解决时，明确告知用户
-"""
-
-TOOL_RESULT_PROMPT = """工具执行结果：
-{tool_result}
-
-请判断：
-1. 任务是否完成？
-2. 是否需要进一步操作？
-3. 如果失败，原因是什么？
-
-输出JSON格式：
-{{
-    "observation": "对结果的客观描述",
-    "is_complete": true/false,
-    "next_action": "下一步动作或'respond'",
-    "next_params": {{}},
-    "response": "如果完成，返回给用户的最终回复"
-}}
+## 规则说明
+- 当你需要收集信息或执行操作时，action填写工具名称
+- 当你认为任务已完成，可以给出最终答案时，action填写"respond"
+- is_complete：当action为"respond"时必须为true，否则为false
+- 每次只执行一个动作，逐步推进
+- 工具执行结果会在下一轮对话中提供给你
 """
 
 INITIAL_DIAGNOSIS_PROMPT = """用户报告：{user_input}

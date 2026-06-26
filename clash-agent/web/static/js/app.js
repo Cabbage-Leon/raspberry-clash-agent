@@ -33,11 +33,13 @@ function initSocket() {
     socket.on('connect', () => {
         updateConnectionStatus(true);
         showNotification('已连接到服务器', 'success');
+        enableChatInput(true);
     });
     
     socket.on('disconnect', () => {
         updateConnectionStatus(false);
         showNotification('与服务器断开连接', 'error');
+        enableChatInput(false);
     });
     
     socket.on('log', (data) => {
@@ -50,6 +52,14 @@ function initSocket() {
     
     socket.on('chat_response', (data) => {
         handleChatResponse(data);
+    });
+    
+    socket.on('react_event', (data) => {
+        handleReactEvent(data);
+    });
+    
+    socket.on('chat_complete', (data) => {
+        handleChatComplete(data);
     });
     
     socket.on('tool_result', (data) => {
@@ -349,14 +359,16 @@ function showToolResult(data) {
 
 // ==================== 聊天 ====================
 
+let isChatRunning = false;
+let currentAgentMessage = null;
+let currentThinkingSteps = [];
+
 function initChat() {
     const input = document.getElementById('chat-input');
     const sendBtn = document.getElementById('btn-send-chat');
     
-    // 发送按钮
     sendBtn.addEventListener('click', sendChatMessage);
     
-    // Enter发送
     input.addEventListener('keypress', (e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
@@ -364,13 +376,11 @@ function initChat() {
         }
     });
     
-    // 自动调整高度
     input.addEventListener('input', () => {
         input.style.height = 'auto';
         input.style.height = Math.min(input.scrollHeight, 120) + 'px';
     });
     
-    // 清空聊天
     document.getElementById('btn-clear-chat').addEventListener('click', () => {
         document.getElementById('chat-messages').innerHTML = `
             <div class="welcome-message">
@@ -380,30 +390,60 @@ function initChat() {
             </div>
         `;
         chatHistory = [];
+        currentThinkingSteps = [];
     });
+}
+
+function enableChatInput(enabled) {
+    const input = document.getElementById('chat-input');
+    const sendBtn = document.getElementById('btn-send-chat');
+    sendBtn.disabled = !enabled || isChatRunning;
+    input.disabled = !enabled;
+}
+
+function setChatStatus(status, text) {
+    const indicator = document.querySelector('#chat-status .status-indicator');
+    const textEl = document.getElementById('chat-status-text');
+    indicator.className = 'status-indicator ' + status;
+    textEl.textContent = text;
 }
 
 function sendChatMessage() {
     const input = document.getElementById('chat-input');
     const message = input.value.trim();
     
-    if (!message) return;
+    if (!message || isChatRunning) return;
     
-    // 添加用户消息
+    isChatRunning = true;
+    currentThinkingSteps = [];
+    enableChatInput(false);
+    setChatStatus('thinking', '思考中...');
+    
     addChatMessage('user', message);
     input.value = '';
+    input.style.height = 'auto';
     
-    // 显示加载状态
-    const loadingMsg = addChatMessage('agent', '<div class="loading"></div> 正在思考...');
+    currentAgentMessage = addChatMessage('agent', '');
+    currentAgentMessage.innerHTML = `
+        <div class="thinking-header">
+            <div class="thinking-indicator">
+                <div class="dot"></div>
+                <div class="dot"></div>
+                <div class="dot"></div>
+            </div>
+            <span>正在分析问题...</span>
+        </div>
+        <div class="thinking-steps" id="current-thinking-steps"></div>
+        <div class="final-response" id="current-final-response" style="display:none;"></div>
+        <div class="time" id="current-message-time"></div>
+    `;
     
-    // 通过WebSocket发送
     socket.emit('chat_message', { message });
 }
 
 function addChatMessage(role, content) {
     const messagesDiv = document.getElementById('chat-messages');
     
-    // 清除欢迎消息
     const welcome = messagesDiv.querySelector('.welcome-message');
     if (welcome) welcome.remove();
     
@@ -430,33 +470,161 @@ function addChatMessage(role, content) {
     return msgDiv;
 }
 
-function handleChatResponse(data) {
-    // 移除加载消息
-    const loadingMsg = document.querySelector('.message.agent:last-child');
-    if (loadingMsg && loadingMsg.querySelector('.loading')) {
-        loadingMsg.remove();
+function handleReactEvent(data) {
+    if (!currentAgentMessage) return;
+    
+    const showThinking = document.getElementById('toggle-thinking').checked;
+    const stepsContainer = document.getElementById('current-thinking-steps');
+    const thinkingHeader = currentAgentMessage.querySelector('.thinking-header span');
+    const event = data.event;
+    const eventData = data.data;
+    
+    switch (event) {
+        case 'start':
+            setChatStatus('thinking', '分析中...');
+            if (thinkingHeader) thinkingHeader.textContent = '正在分析问题...';
+            break;
+            
+        case 'step_start':
+            setChatStatus('thinking', `第 ${eventData.step} 步`);
+            break;
+            
+        case 'reasoning':
+            setChatStatus('thinking', '推理中...');
+            if (thinkingHeader) thinkingHeader.textContent = `第 ${eventData.step} 步：推理中...`;
+            
+            if (showThinking && stepsContainer) {
+                const stepDiv = document.createElement('div');
+                stepDiv.className = 'thinking-step reasoning';
+                stepDiv.id = `step-${eventData.step}`;
+                stepDiv.innerHTML = `
+                    <div class="step-header">
+                        <span class="step-badge">Step ${eventData.step}</span>
+                        <span class="step-action">${eventData.action || '分析'}</span>
+                    </div>
+                    <div class="step-reasoning">
+                        <i class="fas fa-brain"></i>
+                        <span>${escapeHtml(eventData.reasoning)}</span>
+                    </div>
+                    <div class="step-status pending">
+                        <i class="fas fa-hourglass-half"></i> 待执行...
+                    </div>
+                `;
+                stepsContainer.appendChild(stepDiv);
+                scrollChatToBottom();
+            }
+            break;
+            
+        case 'tool_start':
+            setChatStatus('running', '执行工具...');
+            if (thinkingHeader) thinkingHeader.textContent = `执行工具: ${eventData.tool}`;
+            
+            if (showThinking && stepsContainer) {
+                const stepDiv = document.getElementById(`step-${eventData.step}`);
+                if (stepDiv) {
+                    const statusEl = stepDiv.querySelector('.step-status');
+                    if (statusEl) {
+                        statusEl.className = 'step-status running';
+                        statusEl.innerHTML = `<i class="fas fa-cog fa-spin"></i> 正在执行 ${eventData.tool}...`;
+                    }
+                }
+            }
+            break;
+            
+        case 'tool_result':
+            setChatStatus('thinking', '处理结果...');
+            if (thinkingHeader) thinkingHeader.textContent = '分析工具结果...';
+            
+            if (showThinking && stepsContainer) {
+                const stepDiv = document.getElementById(`step-${eventData.step}`);
+                if (stepDiv) {
+                    const statusEl = stepDiv.querySelector('.step-status');
+                    const success = eventData.result?.success !== false;
+                    if (statusEl) {
+                        statusEl.className = 'step-status ' + (success ? 'success' : 'error');
+                        statusEl.innerHTML = success 
+                            ? `<i class="fas fa-check-circle"></i> ${eventData.tool} 执行成功`
+                            : `<i class="fas fa-times-circle"></i> ${eventData.tool} 执行失败: ${escapeHtml(eventData.result?.error || '未知错误')}`;
+                    }
+                    
+                    const resultDetail = document.createElement('div');
+                    resultDetail.className = 'step-observation';
+                    resultDetail.innerHTML = `
+                        <i class="fas fa-eye"></i>
+                        <span>观察: ${escapeHtml(JSON.stringify(eventData.result).substring(0, 200))}${JSON.stringify(eventData.result).length > 200 ? '...' : ''}</span>
+                    `;
+                    stepDiv.appendChild(resultDetail);
+                }
+            }
+            break;
+            
+        case 'complete':
+            setChatStatus('idle', '完成');
+            break;
+            
+        case 'error':
+            setChatStatus('error', '出错');
+            break;
+            
+        case 'end':
+            break;
+    }
+}
+
+function handleChatComplete(data) {
+    isChatRunning = false;
+    enableChatInput(true);
+    setChatStatus('idle', '就绪');
+    
+    if (!currentAgentMessage) return;
+    
+    const finalResponseEl = document.getElementById('current-final-response');
+    const thinkingHeader = currentAgentMessage.querySelector('.thinking-header');
+    const timeEl = document.getElementById('current-message-time');
+    
+    if (timeEl) {
+        timeEl.textContent = new Date().toLocaleTimeString();
+        timeEl.style.display = 'block';
     }
     
     if (data.success) {
-        // 构建详细响应
-        let content = `<div>${data.response}</div>`;
-        
-        if (data.steps && data.steps.length > 0) {
-            content += `<div class="reasoning" style="margin-top: 10px;">
-                <strong>推理过程 (${data.iterations}步):</strong>
-            </div>`;
-            
-            data.steps.forEach((step, i) => {
-                content += `<div class="tool-call">
-                    Step ${i + 1}: ${step.action || '分析'}<br>
-                    推理: ${step.reasoning?.substring(0, 100)}...
-                </div>`;
-            });
+        if (finalResponseEl) {
+            finalResponseEl.style.display = 'block';
+            finalResponseEl.innerHTML = `<div class="response-text">${escapeHtml(data.response)}</div>`;
         }
-        
-        addChatMessage('agent', content);
+        if (thinkingHeader) {
+            thinkingHeader.innerHTML = `<i class="fas fa-check-circle" style="color:#31d350;"></i> <span>任务完成 (${data.iterations}步)</span>`;
+        }
     } else {
-        addChatMessage('agent', `<div class="error">错误: ${data.error}</div>`);
+        if (finalResponseEl) {
+            finalResponseEl.style.display = 'block';
+            finalResponseEl.innerHTML = `<div class="error"><i class="fas fa-exclamation-circle"></i> ${escapeHtml(data.error || '未知错误')}</div>`;
+        }
+        if (thinkingHeader) {
+            thinkingHeader.innerHTML = `<i class="fas fa-times-circle" style="color:#ff4141;"></i> <span>处理失败</span>`;
+        }
+    }
+    
+    currentAgentMessage = null;
+    scrollChatToBottom();
+}
+
+function scrollChatToBottom() {
+    const messagesDiv = document.getElementById('chat-messages');
+    if (messagesDiv) {
+        messagesDiv.scrollTop = messagesDiv.scrollHeight;
+    }
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function handleChatResponse(data) {
+    if (!currentAgentMessage) {
+        addChatMessage('agent', data.success ? data.response : data.error);
     }
 }
 

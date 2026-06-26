@@ -1,13 +1,15 @@
 """
-ReAct引擎 - 核心思考-行动-观察-反思循环
+ReAct引擎 - 核心思考-行动-观察循环
+优化版：每轮仅一次LLM调用，支持实时回调
 """
 
 import json
-from typing import Optional
+import time
+from typing import Optional, Callable
 from dataclasses import asdict
 
 from config.settings import REACT_CONFIG
-from config.prompts import SYSTEM_PROMPT, TOOL_RESULT_PROMPT
+from config.prompts import SYSTEM_PROMPT
 from src.core.llm_adapter import LLMManager
 from src.core.tool_registry import ToolRegistry, global_tool_registry
 from src.core.memory import Memory
@@ -18,7 +20,7 @@ logger = get_logger()
 
 
 class ReActEngine:
-    """ReAct核心引擎"""
+    """ReAct核心引擎 - 优化版"""
 
     def __init__(
         self,
@@ -31,26 +33,35 @@ class ReActEngine:
         self.memory = memory
         self.max_iterations = REACT_CONFIG["max_iterations"]
         self.early_stop = REACT_CONFIG["early_stop_on_failure"]
+        self.step_callbacks: list[Callable] = []
+
+    def add_step_callback(self, callback: Callable):
+        """添加步骤回调，每步完成时调用"""
+        self.step_callbacks.append(callback)
+
+    def _fire_callback(self, event: str, data: dict):
+        """触发回调"""
+        for cb in self.step_callbacks:
+            try:
+                cb(event, data)
+            except Exception as e:
+                logger.error(f"回调执行失败: {e}")
 
     def run(self, user_input: str) -> ReActResult:
         """
-        执行ReAct循环
+        执行ReAct循环（同步版本）
 
-        Args:
-            user_input: 用户输入
-
-        Returns:
-            ReActResult对象
+        优化点：
+        - 每轮只调用一次LLM
+        - 合并推理和反思判断
+        - 支持实时回调推送
         """
         logger.info(f"开始处理用户请求: {user_input}")
 
-        # 添加用户消息到记忆
         self.memory.add_conversation("user", user_input)
 
-        # 构建初始消息列表
         messages = [{"role": "user", "content": user_input}]
 
-        # 构建系统提示词
         system_msg = self._build_system_prompt()
         messages.insert(0, {"role": "system", "content": system_msg})
 
@@ -58,114 +69,118 @@ class ReActEngine:
         final_response = None
         consecutive_failures = 0
 
+        self._fire_callback("start", {"user_input": user_input})
+
         for i in range(self.max_iterations):
             step_num = i + 1
             logger.info(f"=== ReAct循环第 {step_num} 步 ===")
 
-            # 1. Reasoning + Acting: 调用LLM获取下一步行动
+            self._fire_callback("step_start", {"step": step_num})
+
             try:
                 llm_output = self.llm.chat(messages)
                 logger.debug(f"LLM输出: {llm_output[:500]}...")
             except Exception as e:
                 logger.error(f"LLM调用失败: {e}")
                 final_response = f"LLM调用失败: {e}"
+                self._fire_callback("error", {"message": final_response})
                 break
 
-            # 解析LLM输出
-            try:
-                step_data = json.loads(llm_output)
-            except json.JSONDecodeError:
-                logger.error(f"LLM输出格式错误，非JSON: {llm_output[:200]}")
-                # 尝试提取JSON
-                try:
-                    start = llm_output.find("{")
-                    end = llm_output.rfind("}") + 1
-                    if start >= 0 and end > start:
-                        step_data = json.loads(llm_output[start:end])
-                    else:
-                        final_response = "无法解析LLM响应格式"
-                        break
-                except:
-                    final_response = "无法解析LLM响应格式"
-                    break
+            step_data = self._parse_llm_output(llm_output)
+            if step_data is None:
+                final_response = "无法解析LLM响应格式"
+                self._fire_callback("error", {"message": final_response})
+                break
 
-            # 创建步骤对象
             step = ReActStep(
                 step_id=step_num,
                 reasoning=step_data.get("reasoning", ""),
                 action=step_data.get("action"),
                 action_params=step_data.get("action_params", {}),
                 observation="",
-                reflection=step_data.get("reflection", ""),
-                is_complete=False
+                reflection="",
+                is_complete=step_data.get("is_complete", False)
             )
 
             logger.info(f"推理: {step.reasoning[:100]}...")
             logger.info(f"行动: {step.action}, 参数: {step.action_params}")
 
-            # 2. Acting: 执行工具或生成回复
-            if step.action == "respond" or step.action is None:
-                # 直接回复用户
+            self._fire_callback("reasoning", {
+                "step": step_num,
+                "reasoning": step.reasoning,
+                "action": step.action,
+                "action_params": step.action_params
+            })
+
+            if step.action == "respond" or step.is_complete:
                 step.is_complete = True
-                final_response = step.action_params.get("content", step.reasoning)
-                logger.info(f"任务完成（直接回复）: {final_response[:100]}...")
+                final_response = step.action_params.get("content") or step_data.get("response") or step.reasoning
+                step.reflection = "任务完成，给出最终回复"
+                logger.info(f"任务完成: {final_response[:100]}...")
+                self._fire_callback("complete", {
+                    "step": step_num,
+                    "response": final_response
+                })
             else:
-                # 执行工具
+                self._fire_callback("tool_start", {
+                    "step": step_num,
+                    "tool": step.action,
+                    "params": step.action_params
+                })
+
                 tool_result = self.execute_tool(step.action, step.action_params)
                 step.observation = str(tool_result)
 
                 logger.info(f"工具执行结果: {str(tool_result)[:200]}...")
 
-                # 3. Observation: 将结果加入上下文
-                messages.append({"role": "assistant", "content": llm_output})
-                messages.append({
-                    "role": "user",
-                    "content": f"工具执行结果：{step.observation}\n\n请判断任务是否完成，是否需要继续操作。"
+                self._fire_callback("tool_result", {
+                    "step": step_num,
+                    "tool": step.action,
+                    "result": tool_result
                 })
 
-                # 4. Reflection: 判断是否完成
-                try:
-                    reflection_result = self.llm.chat(messages)
-                    reflection_data = json.loads(reflection_result)
-
-                    step.is_complete = reflection_data.get("is_complete", False)
-                    step.reflection = reflection_data.get("observation", "")
-
-                    if step.is_complete:
-                        final_response = reflection_data.get("response", "任务已完成")
-                        logger.info(f"任务完成: {final_response[:100]}...")
-
-                        # 检查工具执行是否实际成功
-                        if isinstance(tool_result, dict):
-                            if not tool_result.get("success", True):
-                                consecutive_failures += 1
-                                if self.early_stop and consecutive_failures >= 2:
-                                    final_response = f"工具执行失败，已连续失败{consecutive_failures}次，终止循环"
-                                    step.is_complete = False
-                                    logger.warning(final_response)
-                                    break
-                            else:
-                                consecutive_failures = 0
+                is_success = True
+                if isinstance(tool_result, dict):
+                    is_success = tool_result.get("success", True)
+                    if not is_success:
+                        consecutive_failures += 1
+                        if self.early_stop and consecutive_failures >= 3:
+                            final_response = f"工具连续失败{consecutive_failures}次，终止执行。最后错误: {tool_result.get('error', '未知错误')}"
+                            step.is_complete = False
+                            step.reflection = f"连续失败{consecutive_failures}次，提前终止"
+                            logger.warning(final_response)
+                            steps.append(step)
+                            self._fire_callback("error", {"message": final_response})
+                            break
                     else:
                         consecutive_failures = 0
 
-                except Exception as e:
-                    logger.error(f"反思阶段失败: {e}")
-                    step.reflection = f"反思失败: {e}"
+                step.reflection = "工具执行完成，将根据结果决定下一步" if is_success else "工具执行失败，需要调整策略"
+
+                messages.append({"role": "assistant", "content": llm_output})
+                messages.append({
+                    "role": "user",
+                    "content": f"工具 {step.action} 执行结果：\n{step.observation}\n\n请根据结果决定下一步行动。"
+                })
 
             steps.append(step)
 
             if step.is_complete:
                 break
 
-        # 如果达到最大迭代次数仍未完成
         if final_response is None:
             final_response = f"已达到最大迭代次数({self.max_iterations})，任务未能完成"
+            self._fire_callback("max_iterations", {"message": final_response})
 
-        # 添加助手回复到记忆
         self.memory.add_conversation("assistant", final_response)
 
         logger.info(f"ReAct循环结束，共 {len(steps)} 步")
+
+        self._fire_callback("end", {
+            "iterations": len(steps),
+            "success": steps[-1].is_complete if steps else False,
+            "response": final_response
+        })
 
         return ReActResult(
             response=final_response,
@@ -174,6 +189,45 @@ class ReActEngine:
             success=steps[-1].is_complete if steps else False,
             final_state="completed" if steps and steps[-1].is_complete else "max_iterations" if len(steps) >= self.max_iterations else "failed"
         )
+
+    def _parse_llm_output(self, llm_output: str) -> Optional[dict]:
+        """解析LLM输出，支持多种格式"""
+        if not llm_output or not llm_output.strip():
+            logger.error("LLM返回空响应")
+            return None
+
+        try:
+            return json.loads(llm_output)
+        except json.JSONDecodeError:
+            pass
+
+        try:
+            start = llm_output.find("{")
+            end = llm_output.rfind("}") + 1
+            if start >= 0 and end > start:
+                extracted = llm_output[start:end]
+                return json.loads(extracted)
+        except Exception:
+            pass
+
+        try:
+            lines = llm_output.strip().split("\n")
+            json_lines = []
+            in_json = False
+            for line in lines:
+                if line.strip().startswith("{"):
+                    in_json = True
+                if in_json:
+                    json_lines.append(line)
+                if line.strip().startswith("}") and in_json:
+                    break
+            if json_lines:
+                return json.loads("\n".join(json_lines))
+        except Exception:
+            pass
+
+        logger.error(f"无法解析LLM输出: {llm_output[:300]}")
+        return None
 
     def _build_system_prompt(self) -> str:
         """构建系统提示词"""
@@ -186,16 +240,7 @@ class ReActEngine:
         )
 
     def execute_tool(self, tool_name: str, params: dict) -> dict:
-        """
-        执行工具
-
-        Args:
-            tool_name: 工具名称
-            params: 工具参数
-
-        Returns:
-            工具执行结果
-        """
+        """执行工具"""
         if not self.tools.has_tool(tool_name):
             return {
                 "success": False,
@@ -213,15 +258,7 @@ class ReActEngine:
             }
 
     def diagnose(self, user_input: str) -> dict:
-        """
-        快速诊断（不进入完整ReAct循环）
-
-        Args:
-            user_input: 用户描述的症状
-
-        Returns:
-            诊断结果
-        """
+        """快速诊断（不进入完整ReAct循环）"""
         from config.prompts import INITIAL_DIAGNOSIS_PROMPT
 
         messages = [

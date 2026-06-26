@@ -867,6 +867,202 @@ body {
     to { transform: rotate(360deg); }
 }
 
+/* 聊天状态指示器 */
+.chat-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    font-size: 0.85rem;
+    color: #8b98a5;
+}
+
+.status-indicator {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+}
+
+.status-indicator.idle {
+    background: #31d350;
+    box-shadow: 0 0 6px #31d350;
+}
+
+.status-indicator.thinking {
+    background: #ff7a00;
+    box-shadow: 0 0 6px #ff7a00;
+    animation: pulse 1.5s ease-in-out infinite;
+}
+
+.status-indicator.running {
+    background: #1da1f2;
+    box-shadow: 0 0 6px #1da1f2;
+    animation: pulse 1s ease-in-out infinite;
+}
+
+.status-indicator.error {
+    background: #ff4141;
+    box-shadow: 0 0 6px #ff4141;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+}
+
+/* 思考过程显示开关 */
+.toggle-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.85rem;
+    color: #8b98a5;
+    cursor: pointer;
+}
+
+.toggle-label input[type="checkbox"] {
+    cursor: pointer;
+}
+
+/* 思考过程头部 */
+.thinking-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #2a3947;
+}
+
+.thinking-indicator {
+    display: flex;
+    gap: 4px;
+}
+
+.thinking-indicator .dot {
+    width: 6px;
+    height: 6px;
+    background: #ff7a00;
+    border-radius: 50%;
+    animation: bounce 1.4s ease-in-out infinite both;
+}
+
+.thinking-indicator .dot:nth-child(1) { animation-delay: -0.32s; }
+.thinking-indicator .dot:nth-child(2) { animation-delay: -0.16s; }
+
+@keyframes bounce {
+    0%, 80%, 100% { transform: scale(0); }
+    40% { transform: scale(1); }
+}
+
+/* 思考步骤卡片 */
+.thinking-steps {
+    margin-bottom: 12px;
+}
+
+.thinking-step {
+    background: #1c2733;
+    border: 1px solid #2a3947;
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 10px;
+}
+
+.step-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.step-badge {
+    background: #ff7a00;
+    color: #fff;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.step-action {
+    font-weight: 600;
+    color: #1da1f2;
+    font-size: 0.9rem;
+}
+
+.step-reasoning {
+    display: flex;
+    gap: 8px;
+    color: #e7e9ea;
+    font-size: 0.9rem;
+    line-height: 1.5;
+    margin-bottom: 8px;
+}
+
+.step-reasoning i {
+    color: #ff7a00;
+    margin-top: 3px;
+    flex-shrink: 0;
+}
+
+.step-status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.85rem;
+    padding: 6px 10px;
+    border-radius: 4px;
+}
+
+.step-status.pending {
+    background: #2a3947;
+    color: #8b98a5;
+}
+
+.step-status.running {
+    background: rgba(29, 161, 242, 0.1);
+    color: #1da1f2;
+}
+
+.step-status.success {
+    background: rgba(49, 211, 80, 0.1);
+    color: #31d350;
+}
+
+.step-status.error {
+    background: rgba(255, 65, 65, 0.1);
+    color: #ff4141;
+}
+
+.step-observation {
+    display: flex;
+    gap: 8px;
+    color: #8b98a5;
+    font-size: 0.85rem;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid #2a3947;
+}
+
+.step-observation i {
+    color: #8b98a5;
+    margin-top: 2px;
+    flex-shrink: 0;
+}
+
+/* 最终回复 */
+.final-response {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 2px solid #31d350;
+}
+
+.response-text {
+    color: #e7e9ea;
+    line-height: 1.6;
+    font-size: 0.95rem;
+}
+
 /* 响应式 */
 @media (max-width: 768px) {
     .sidebar {

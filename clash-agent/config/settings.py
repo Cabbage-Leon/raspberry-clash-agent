@@ -31,6 +31,12 @@ LLM_CONFIG = {
     # 推理参数
     "temperature": 0.0,  # 运维场景用确定性输出
     "max_tokens": int(os.getenv("MAX_TOKENS", "2048")),
+
+    # 重试配置
+    "max_retries": int(os.getenv("LLM_MAX_RETRIES", "3")),
+    "retry_base_delay": float(os.getenv("LLM_RETRY_BASE_DELAY", "1.0")),  # 秒
+    "retry_max_delay": float(os.getenv("LLM_RETRY_MAX_DELAY", "10.0")),  # 秒
+    "timeout": int(os.getenv("LLM_TIMEOUT", "60")),  # 秒
 }
 
 

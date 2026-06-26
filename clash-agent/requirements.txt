@@ -1,0 +1,7 @@
+# Clash Agent - 核心依赖
+requests>=2.31.0
+pyyaml>=6.0
+python-dotenv>=1.0.0
+
+# 异步支持（可选，用于异步LLM调用）
+aiohttp>=3.9.0

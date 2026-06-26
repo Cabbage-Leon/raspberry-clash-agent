@@ -5,3 +5,7 @@ python-dotenv>=1.0.0
 
 # 异步支持（可选，用于异步LLM调用）
 aiohttp>=3.9.0
+
+# Web UI依赖
+flask>=3.0.0
+flask_socketio>=5.3.0

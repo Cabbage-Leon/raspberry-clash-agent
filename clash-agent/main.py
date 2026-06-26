@@ -398,10 +398,27 @@ def main():
     parser.add_argument("--status", action="store_true", help="显示状态信息")
     parser.add_argument("--json", action="store_true", help="JSON格式输出")
     parser.add_argument("--verbose", action="store_true", help="详细输出")
+    parser.add_argument("--web", action="store_true", help="启动Web UI模式")
+    parser.add_argument("--host", type=str, default="0.0.0.0", help="Web服务器地址")
+    parser.add_argument("--port", type=int, default=5000, help="Web服务器端口")
 
     args = parser.parse_args()
 
     try:
+        # Web模式
+        if args.web:
+            from src.web.app import run_web_server
+            print(f"""
+╔══════════════════════════════════════════════════╗
+║          Clash Agent Web UI                      ║
+║                                                  ║
+║  地址: http://{args.host}:{args.port}              ║
+║  状态: 启动中...                                  ║
+╚══════════════════════════════════════════════════╝
+""")
+            run_web_server(host=args.host, port=args.port, debug=args.verbose)
+            return
+
         agent = ClashAgent()
 
         if args.status:
